@@ -33,12 +33,12 @@ suite() ->
 
 all() ->
     [
-        test_simple_fibonacci
-        % test_complex_data_processing,
-        % test_echo,
-        % test_batch_processing,
-        % test_concurrent_calls,
-        % test_async_call
+        test_simple_fibonacci,
+        test_complex_data_processing,
+        test_echo,
+        test_batch_processing,
+        test_concurrent_calls,
+        test_async_call
     ].
 
 init_per_suite(Config) ->
@@ -134,7 +134,7 @@ test_complex_data_processing(Config) ->
     ct:pal("Input user: ~p", [User]),
 
     % Process user
-    Result = erlcracker:call(PoolName, test_module, process_user, [User], 5000),
+    {ok, Result} = erlcracker:call(PoolName, test_module, process_user, [User], 5000),
 
     ct:pal("Processed user: ~p", [Result]),
 
@@ -163,7 +163,7 @@ test_echo(Config) ->
 
     lists:foreach(
         fun(Data) ->
-            Result = erlcracker:call(PoolName, test_module, echo, [Data], 5000),
+            {ok, Result} = erlcracker:call(PoolName, test_module, echo, [Data], 5000),
             ct:pal("Echo ~p -> ~p", [Data, Result]),
             % Note: Maps may have binary keys after JSON round-trip
             case Data of
@@ -187,7 +187,7 @@ test_batch_processing(Config) ->
 
     % Sum list of numbers
     Numbers = [1, 2, 3, 4, 5],
-    Result = erlcracker:call(PoolName, test_module, batch_sum, [Numbers], 5000),
+    {ok, Result} = erlcracker:call(PoolName, test_module, batch_sum, [Numbers], 5000),
 
     ct:pal("Sum of ~p = ~p", [Numbers, Result]),
 
@@ -228,8 +228,14 @@ test_concurrent_calls(Config) ->
 
     ct:pal("Concurrent results: ~p", [Results]),
 
-    % Verify we got all results
+    % Verify we got all results (each should be {ok, FibValue})
     NumCalls = length(Results),
+    lists:foreach(
+        fun({_N, Result}) ->
+            {ok, _Value} = Result  % Verify each result is {ok, Value}
+        end,
+        Results
+    ),
 
     ok.
 
@@ -251,6 +257,7 @@ test_async_call(Config) ->
     end,
 
     % Verify result (7th fibonacci number is 13)
-    13 = Result,
+    % Note: async calls return {ok, Value} directly in the message
+    {ok, 13} = Result,
 
     ok.
