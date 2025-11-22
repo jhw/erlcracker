@@ -41,12 +41,13 @@ start_runtime(Config) ->
     end,
 
     % Start Python instance
+    logger:debug("Starting Python runtime with opts: ~p", [ErlPortOptsWithInterpreter]),
     case python:start(ErlPortOptsWithInterpreter) of
         {ok, PythonPid} ->
-            logger:debug("Python runtime started: ~p (path: ~s)", [PythonPid, PythonPath]),
+            logger:info("Python runtime started successfully: ~p (path: ~s)", [PythonPid, PythonPath]),
             {ok, PythonPid};
         {error, Reason} ->
-            logger:error("Failed to start Python runtime: ~p", [Reason]),
+            logger:error("Failed to start Python runtime: ~p (path: ~s)", [Reason, PythonPath]),
             {error, Reason}
     end.
 
@@ -65,33 +66,45 @@ start_runtime(Config) ->
 %% The Python function receives a JSON string and must return a JSON string.
 %%
 call_function(PythonPid, Module, Function, Args) ->
+    logger:debug("Python call starting: ~p:~p with args: ~p", [Module, Function, Args]),
+
     % Encode arguments as JSON
     % For single argument [Data], encode Data directly
     % For multiple arguments, encode as JSON array
+    % Note: thoas:encode returns the binary directly (not {ok, Binary})
     JsonArgs = case Args of
         [SingleArg] ->
             % Single argument - encode it directly
-            case thoas:encode(SingleArg) of
-                {ok, Json} -> [Json];
-                {error, EncodeReason} -> error({json_encode_failed, EncodeReason})
+            try thoas:encode(SingleArg) of
+                Json -> [Json]
+            catch
+                error:Reason -> error({json_encode_failed, Reason})
             end;
         MultipleArgs ->
             % Multiple arguments - encode each one
             lists:map(fun(Arg) ->
-                case thoas:encode(Arg) of
-                    {ok, Json} -> Json;
-                    {error, EncodeReason} -> error({json_encode_failed, EncodeReason})
+                try thoas:encode(Arg) of
+                    Json -> Json
+                catch
+                    error:Reason -> error({json_encode_failed, Reason})
                 end
             end, MultipleArgs)
     end,
 
     % Call Python function with JSON arguments
+    logger:debug("Calling Python ~p:~p with JSON args: ~p", [Module, Function, JsonArgs]),
     JsonResult = python:call(PythonPid, Module, Function, JsonArgs),
+    logger:debug("Python call completed, JSON result: ~p", [JsonResult]),
 
     % Decode JSON response back to Erlang term
+    % Note: thoas:decode returns {ok, Term} | {error, Reason}
     case thoas:decode(JsonResult) of
-        {ok, Result} -> Result;
-        {error, DecodeReason} -> error({json_decode_failed, DecodeReason, JsonResult})
+        {ok, Result} ->
+            logger:debug("Python result decoded successfully: ~p", [Result]),
+            Result;
+        {error, DecodeReason} ->
+            logger:error("JSON decode failed: ~p, raw result: ~p", [DecodeReason, JsonResult]),
+            error({json_decode_failed, DecodeReason, JsonResult})
     end.
 
 %% Stop a Python runtime instance

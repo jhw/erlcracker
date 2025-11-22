@@ -72,6 +72,10 @@ init_per_suite(Config) ->
 
     ct:pal("Pool started: ~p", [PoolPid]),
 
+    % Unlink from pool supervisor so it doesn't get killed when init_per_suite exits
+    % The pool should live for the duration of the test suite
+    unlink(PoolPid),
+
     % Wait longer for workers to initialize
     timer:sleep(2000),
 
@@ -102,7 +106,7 @@ test_simple_fibonacci(Config) ->
 
     % Verify result
     case Result of
-        55 ->
+        {ok, 55} ->
             ct:pal("SUCCESS: Got expected result 55"),
             ok;
         {error, timeout} ->
@@ -112,7 +116,7 @@ test_simple_fibonacci(Config) ->
             ct:fail({unexpected_error, Reason});
         Other ->
             ct:pal("UNEXPECTED RESULT: ~p", [Other]),
-            55 = Other  % This will fail with badmatch
+            {ok, 55} = Other  % This will fail with badmatch
     end.
 
 test_complex_data_processing(Config) ->
