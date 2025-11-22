@@ -1,0 +1,16 @@
+{application, erlcracker, [
+    {description, "A Firecracker/Lambda-inspired execution environment manager for Erlang"},
+    {vsn, "1.0.0"},
+    {registered, []},
+    {applications, [
+        kernel,
+        stdlib,
+        erlport
+    ]},
+    {env, []},
+    {modules, []},
+    {licenses, ["MIT"]},
+    {links, [
+        {"GitHub", "https://github.com/your-org/erlcracker"}
+    ]}
+]}.

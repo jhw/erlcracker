@@ -1,0 +1,37 @@
+# Rebar3
+_build/
+_checkouts/
+rebar3.crashdump
+rebar.lock
+
+# Erlang
+*.beam
+*.plt
+*.swp
+*.swo
+.erlang.cookie
+ebin/
+log/
+logs/
+erl_crash.dump
+
+# Editor/IDE
+.vscode/
+.idea/
+*.iml
+.DS_Store
+*~
+\#*\#
+.\#*
+
+# Testing
+.eunit/
+test/*.beam
+ct_run.*
+*.coverdata
+
+# Documentation
+doc/*.html
+doc/*.css
+doc/*.png
+doc/edoc-info
