@@ -141,11 +141,11 @@ def process_data(json_input):
 
 ```erlang
 % Simple value
-55 = erlcracker:call(my_python_pool, math_utils, fibonacci, [10]).
+{ok, 55} = erlcracker:call(my_python_pool, math_utils, fibonacci, [10]).
 
 % Complex data structure
 Input = #{name => <<"test">>, items => [1, 2, 3]},
-Result = erlcracker:call(my_python_pool, math_utils, process_data, [Input]).
+{ok, Result} = erlcracker:call(my_python_pool, math_utils, process_data, [Input]).
 % Result = #{<<"processed">> => true, <<"count">> => 3, <<"name">> => <<"TEST">>}
 ```
 
