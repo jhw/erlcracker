@@ -17,19 +17,27 @@ Practical examples showing common usage patterns for ErlCracker.
 **Python module** (`priv/python/calculator.py`):
 
 ```python
-def add(a, b):
-    return a + b
+import json
 
-def multiply(a, b):
-    return a * b
+def add(json_input):
+    """Add two numbers. Input: [a, b]"""
+    [a, b] = json.loads(json_input)
+    return json.dumps(a + b)
 
-def divide(a, b):
+def multiply(json_input):
+    """Multiply two numbers. Input: [a, b]"""
+    [a, b] = json.loads(json_input)
+    return json.dumps(a * b)
+
+def divide(json_input):
+    """Divide two numbers. Input: [a, b]"""
+    [a, b] = json.loads(json_input)
     if b == 0:
         raise ValueError("Cannot divide by zero")
-    return a / b
+    return json.dumps(a / b)
 ```
 
-**Erlang usage**:
+**Erlang usage** (JSON handled automatically):
 
 ```erlang
 start() ->
@@ -40,13 +48,17 @@ start() ->
         #{pool_size => 2, python_path => "priv/python"}
     ),
 
-    % Call functions
-    {ok, 10} = erlcracker:call(calc_pool, calculator, add, [4, 6]),
-    {ok, 24} = erlcracker:call(calc_pool, calculator, multiply, [4, 6]),
-    {ok, 2.0} = erlcracker:call(calc_pool, calculator, divide, [10, 5]),
+    % Call functions - pass Erlang terms, get Erlang terms back
+    10 = erlcracker:call(calc_pool, calculator, add, [[4, 6]]),
+    24 = erlcracker:call(calc_pool, calculator, multiply, [[4, 6]]),
+    2.0 = erlcracker:call(calc_pool, calculator, divide, [[10, 5]]),
 
     % Error handling
-    {error, _} = erlcracker:call(calc_pool, calculator, divide, [10, 0]),
+    try
+        erlcracker:call(calc_pool, calculator, divide, [[10, 0]])
+    catch
+        error:{json_decode_failed, _, _} -> {error, python_error}
+    end,
 
     % Stop pool
     ok = erlcracker:stop_pool(calc_pool).
@@ -59,30 +71,43 @@ start() ->
 ```python
 import json
 
-def process_user(user_dict):
+def process_user(json_input):
     """Process user data and return enhanced version."""
-    return {
+    user_dict = json.loads(json_input)
+    result = {
         'id': user_dict['id'],
         'name': user_dict['name'].upper(),
         'email': user_dict['email'].lower(),
         'processed': True
     }
+    return json.dumps(result)
 
-def batch_process(users_list):
+def batch_process(json_input):
     """Process multiple users."""
-    return [process_user(user) for user in users_list]
+    users_list = json.loads(json_input)
+    results = []
+    for user in users_list:
+        results.append({
+            'id': user['id'],
+            'name': user['name'].upper(),
+            'email': user['email'].lower(),
+            'processed': True
+        })
+    return json.dumps(results)
 
-def analyze_text(text):
+def analyze_text(json_input):
     """Return text analysis."""
-    return {
+    text = json.loads(json_input)
+    result = {
         'length': len(text),
         'words': len(text.split()),
         'upper': text.upper(),
         'reversed': text[::-1]
     }
+    return json.dumps(result)
 ```
 
-**Erlang usage**:
+**Erlang usage** (JSON automatic):
 
 ```erlang
 process_data() ->
@@ -93,21 +118,21 @@ process_data() ->
         #{pool_size => 4, python_path => "priv/python"}
     ),
 
-    % Process single user
+    % Process single user - pass map, get map back
     User = #{id => 1, name => <<"john doe">>, email => <<"JOHN@EXAMPLE.COM">>},
-    {ok, ProcessedUser} = erlcracker:call(data_pool, data_processor, process_user, [User]),
-    % ProcessedUser = #{id => 1, name => <<"JOHN DOE">>, email => <<"john@example.com">>, ...}
+    ProcessedUser = erlcracker:call(data_pool, data_processor, process_user, [User]),
+    % ProcessedUser = #{<<"id">> => 1, <<"name">> => <<"JOHN DOE">>, <<"email">> => <<"john@example.com">>, ...}
 
     % Batch process
     Users = [
         #{id => 1, name => <<"alice">>, email => <<"ALICE@TEST.COM">>},
         #{id => 2, name => <<"bob">>, email => <<"BOB@TEST.COM">>}
     ],
-    {ok, ProcessedUsers} = erlcracker:call(data_pool, data_processor, batch_process, [Users]),
+    ProcessedUsers = erlcracker:call(data_pool, data_processor, batch_process, [Users]),
 
     % Text analysis
-    {ok, Analysis} = erlcracker:call(data_pool, data_processor, analyze_text, [<<"Hello World">>]),
-    % Analysis = #{length => 11, words => 2, upper => <<"HELLO WORLD">>, ...}
+    Analysis = erlcracker:call(data_pool, data_processor, analyze_text, [<<"Hello World">>]),
+    % Analysis = #{<<"length">> => 11, <<"words">> => 2, <<"upper">> => <<"HELLO WORLD">>, ...}
 
     ok.
 ```

@@ -95,32 +95,58 @@ end.
 erlcracker:stop_pool(my_python_pool).
 ```
 
+## Data Marshalling
+
+**ErlCracker uses JSON for all data exchange with runtimes.** This provides a simple, universal format that works across Python, Go, Node.js, and other languages.
+
+- **Erlang → Runtime**: Arguments are automatically JSON-encoded
+- **Runtime → Erlang**: Results are automatically JSON-decoded
+
+**You don't need to handle JSON encoding/decoding** - ErlCracker does it for you!
+
 ## Python Runtime Example
 
 **Python module** (`priv/python/math_utils.py`):
 
 ```python
-def fibonacci(n):
-    """Calculate the nth Fibonacci number."""
-    if n <= 1:
-        return n
-    return fibonacci(n-1) + fibonacci(n-2)
+import json
 
-def factorial(n):
-    """Calculate n!"""
-    if n <= 1:
-        return 1
-    return n * factorial(n-1)
+def fibonacci(json_input):
+    """Calculate the nth Fibonacci number."""
+    n = json.loads(json_input)
+
+    def fib(x):
+        if x <= 1:
+            return x
+        return fib(x-1) + fib(x-2)
+
+    result = fib(n)
+    return json.dumps(result)
+
+def process_data(json_input):
+    """Process complex data structure."""
+    data = json.loads(json_input)
+
+    # Work with data as normal Python dict/list
+    result = {
+        'processed': True,
+        'count': len(data.get('items', [])),
+        'name': data.get('name', '').upper()
+    }
+
+    return json.dumps(result)
 ```
 
-**Erlang usage**:
+**Erlang usage** (no JSON encoding needed!):
 
 ```erlang
-% Fibonacci
-{ok, 55} = erlcracker:call(my_python_pool, math_utils, fibonacci, [10]).
+% Simple value
+55 = erlcracker:call(my_python_pool, math_utils, fibonacci, [10]).
 
-% Factorial
-{ok, 120} = erlcracker:call(my_python_pool, math_utils, factorial, [5]).
+% Complex data structure
+Input = #{name => <<"test">>, items => [1, 2, 3]},
+Result = erlcracker:call(my_python_pool, math_utils, process_data, [Input]).
+% Result = #{<<"processed">> => true, <<"count">> => 3, <<"name">> => <<"TEST">>}
 ```
 
 ## Configuration

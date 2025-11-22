@@ -5,6 +5,12 @@
 %%%
 %%% Implements the erlcracker_runtime behaviour for Python using ErlPort.
 %%% Manages Python interpreter instances and executes Python function calls.
+%%%
+%%% DATA MARSHALLING:
+%%% All data exchange with Python uses JSON:
+%%%   - Args are JSON-encoded before sending to Python
+%%%   - Results are JSON-decoded after receiving from Python
+%%% This provides a simple, universal format that works across all runtimes.
 
 %% erlcracker_runtime callbacks
 -export([start_runtime/1, call_function/4, stop_runtime/1]).
@@ -49,14 +55,44 @@ start_runtime(Config) ->
 %% RuntimeHandle - Python process PID from start_runtime/1
 %% Module - Python module name (atom or binary)
 %% Function - Function name (atom or binary)
-%% Args - List of arguments
+%% Args - List of Erlang terms to pass as arguments
 %%
-%% Returns: Result of the Python function call
+%% Returns: Erlang term (decoded from JSON response)
 %% May throw/raise on errors
 %%
+%% IMPORTANT: Python functions must return JSON strings.
+%% If Args is a single-element list [Data], we encode Data as JSON and pass it.
+%% The Python function receives a JSON string and must return a JSON string.
+%%
 call_function(PythonPid, Module, Function, Args) ->
-    % ErlPort's python:call/4 handles the communication
-    python:call(PythonPid, Module, Function, Args).
+    % Encode arguments as JSON
+    % For single argument [Data], encode Data directly
+    % For multiple arguments, encode as JSON array
+    JsonArgs = case Args of
+        [SingleArg] ->
+            % Single argument - encode it directly
+            case thoas:encode(SingleArg) of
+                {ok, Json} -> [Json];
+                {error, EncodeReason} -> error({json_encode_failed, EncodeReason})
+            end;
+        MultipleArgs ->
+            % Multiple arguments - encode each one
+            lists:map(fun(Arg) ->
+                case thoas:encode(Arg) of
+                    {ok, Json} -> Json;
+                    {error, EncodeReason} -> error({json_encode_failed, EncodeReason})
+                end
+            end, MultipleArgs)
+    end,
+
+    % Call Python function with JSON arguments
+    JsonResult = python:call(PythonPid, Module, Function, JsonArgs),
+
+    % Decode JSON response back to Erlang term
+    case thoas:decode(JsonResult) of
+        {ok, Result} -> Result;
+        {error, DecodeReason} -> error({json_decode_failed, DecodeReason, JsonResult})
+    end.
 
 %% Stop a Python runtime instance
 %%

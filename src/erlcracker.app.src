@@ -5,7 +5,8 @@
     {applications, [
         kernel,
         stdlib,
-        erlport
+        erlport,
+        thoas
     ]},
     {env, []},
     {modules, []},
