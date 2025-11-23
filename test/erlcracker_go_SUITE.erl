@@ -46,16 +46,16 @@ init_per_suite(Config) ->
     {ok, _} = application:ensure_all_started(erlport),
     {ok, _} = application:ensure_all_started(thoas),
 
-    % Get priv directory for Go modules
+    % Get priv directory for Go binary
     PrivDir = code:priv_dir(erlcracker),
-    GoSrcPath = filename:join(PrivDir, "go/test_module.go"),
+    GoBinaryPath = filename:join(PrivDir, "bin/test_module"),
 
-    ct:pal("Starting test pool with Go source: ~s", [GoSrcPath]),
+    ct:pal("Starting test pool with Go binary: ~s", [GoBinaryPath]),
 
-    % Check if test_module.go exists
-    case filelib:is_file(GoSrcPath) of
-        true -> ct:pal("Found test_module.go at ~s", [GoSrcPath]);
-        false -> ct:pal("WARNING: test_module.go NOT FOUND at ~s", [GoSrcPath])
+    % Check if test_module binary exists
+    case filelib:is_file(GoBinaryPath) of
+        true -> ct:pal("Found test_module binary at ~s", [GoBinaryPath]);
+        false -> ct:pal("WARNING: test_module binary NOT FOUND at ~s", [GoBinaryPath])
     end,
 
     % Start test pool
@@ -65,7 +65,7 @@ init_per_suite(Config) ->
         #{
             pool_size => 4,
             worker_timeout_ms => 30000,
-            go_src => GoSrcPath
+            go_binary => GoBinaryPath
         }
     ),
 

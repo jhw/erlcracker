@@ -26,39 +26,25 @@
 %% Start a Go runtime instance
 %%
 %% Config may include:
-%%   - go_src: Path to Go source file to compile and run (REQUIRED)
-%%   - go_path: Additional GOPATH directories
-%%   - go: Go executable command (default: "go")
+%%   - go_binary: Path to compiled Go binary (REQUIRED)
 %%
 %% Returns: {ok, GoPid} | {error, Reason}
 %%
 start_runtime(Config) ->
     % Extract Go configuration
-    GoSrc = maps:get(go_src, Config),
+    GoBinary = maps:get(go_binary, Config),
 
-    % Build ErlPort options - go_src is required
-    ErlPortOpts = [{go_src, GoSrc}],
-
-    % Add optional go_path
-    ErlPortOptsWithPath = case maps:get(go_path, Config, undefined) of
-        undefined -> ErlPortOpts;
-        GoPath -> [{go_path, GoPath} | ErlPortOpts]
-    end,
-
-    % Add optional go executable
-    ErlPortOptsWithGo = case maps:get(go, Config, undefined) of
-        undefined -> ErlPortOptsWithPath;
-        GoCmd -> [{go, GoCmd} | ErlPortOptsWithPath]
-    end,
+    % Build ErlPort options - go_binary is required
+    ErlPortOpts = [{go_binary, GoBinary}],
 
     % Start Go instance
-    logger:debug("Starting Go runtime with opts: ~p", [ErlPortOptsWithGo]),
-    case go:start(ErlPortOptsWithGo) of
+    logger:debug("Starting Go runtime with opts: ~p", [ErlPortOpts]),
+    case go:start(ErlPortOpts) of
         {ok, GoPid} ->
-            logger:info("Go runtime started successfully: ~p (source: ~s)", [GoPid, GoSrc]),
+            logger:info("Go runtime started successfully: ~p (binary: ~s)", [GoPid, GoBinary]),
             {ok, GoPid};
         {error, Reason} ->
-            logger:error("Failed to start Go runtime: ~p (source: ~s)", [Reason, GoSrc]),
+            logger:error("Failed to start Go runtime: ~p (binary: ~s)", [Reason, GoBinary]),
             {error, Reason}
     end.
 
