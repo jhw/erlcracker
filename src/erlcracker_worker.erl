@@ -15,7 +15,13 @@
 -record(state, {
     runtime_handle :: term(),
     runtime_module :: module(),
-    pool_name :: atom()
+    pool_name :: atom(),
+    pool_config :: map(),
+    call_count = 0 :: non_neg_integer(),
+    started_at :: integer(),
+    max_calls :: non_neg_integer() | undefined,
+    max_age_ms :: non_neg_integer() | undefined,
+    age_timer_ref :: reference() | undefined
 }).
 
 %%====================================================================
@@ -36,11 +42,22 @@ call_runtime(WorkerPid, Module, Function, Args, CallerPid, PoolPid, TimeoutMs) -
 init([PoolName, RuntimeModule, PoolConfig]) ->
     process_flag(trap_exit, true),
 
+    % Extract recycling config
+    MaxCalls = maps:get(max_calls_per_worker, PoolConfig, undefined),
+    MaxAgeMs = maps:get(max_worker_age_ms, PoolConfig, undefined),
+
     % Start runtime using runtime module
     case RuntimeModule:start_runtime(PoolConfig) of
         {ok, RuntimeHandle} ->
             logger:info("ErlCracker worker ~p started with ~p runtime (handle: ~p, pool: ~p)",
                 [self(), RuntimeModule, RuntimeHandle, PoolName]),
+
+            % Set up age-based recycling timer if configured
+            AgeTimerRef = case MaxAgeMs of
+                undefined -> undefined;
+                Ms when is_integer(Ms), Ms > 0 ->
+                    erlang:send_after(Ms, self(), recycle_age_limit)
+            end,
 
             % Notify pool we're ready
             PoolName ! {worker_available, self()},
@@ -48,7 +65,13 @@ init([PoolName, RuntimeModule, PoolConfig]) ->
             {ok, #state{
                 runtime_handle = RuntimeHandle,
                 runtime_module = RuntimeModule,
-                pool_name = PoolName
+                pool_name = PoolName,
+                pool_config = PoolConfig,
+                call_count = 0,
+                started_at = erlang:monotonic_time(millisecond),
+                max_calls = MaxCalls,
+                max_age_ms = MaxAgeMs,
+                age_timer_ref = AgeTimerRef
             }};
         {error, Reason} ->
             logger:error("ErlCracker worker ~p failed to start runtime ~p: ~p",
@@ -88,7 +111,8 @@ handle_cast({call_runtime, Module, Function, Args, CallerPid, PoolPid, TimeoutMs
         % Wait for result or timeout
         receive
             {CallRef, Result} ->
-                % Call completed in time
+                % Call completed in time - notify worker for call counting
+                WorkerPid ! call_completed,
                 case Result of
                     {ok, Value} ->
                         CallerPid ! {runtime_result, WorkerPid, {ok, Value}},
@@ -102,6 +126,8 @@ handle_cast({call_runtime, Module, Function, Args, CallerPid, PoolPid, TimeoutMs
             logger:error("ErlCracker worker ~p: Call to ~p:~p timed out after ~pms, killing call process ~p",
                 [WorkerPid, Module, Function, TimeoutMs, CallPid]),
             exit(CallPid, kill),
+            % Notify worker for call counting (timeouts still count)
+            WorkerPid ! call_completed,
             % Send timeout error to caller and pool
             CallerPid ! {runtime_result, WorkerPid, {error, worker_timeout}},
             PoolPid ! {worker_done, WorkerPid, {error, worker_timeout}}
@@ -111,6 +137,28 @@ handle_cast({call_runtime, Module, Function, Args, CallerPid, PoolPid, TimeoutMs
 
 handle_cast(_Msg, State) ->
     {noreply, State}.
+
+handle_info(call_completed, State) ->
+    NewCallCount = State#state.call_count + 1,
+    NewState = State#state{call_count = NewCallCount},
+
+    % Check if we need to recycle due to call count limit
+    case State#state.max_calls of
+        undefined ->
+            {noreply, NewState};
+        MaxCalls when NewCallCount >= MaxCalls ->
+            logger:info("ErlCracker worker ~p: Recycling after ~p calls (limit: ~p)",
+                [self(), NewCallCount, MaxCalls]),
+            recycle_worker(NewState);
+        _ ->
+            {noreply, NewState}
+    end;
+
+handle_info(recycle_age_limit, State) ->
+    Age = erlang:monotonic_time(millisecond) - State#state.started_at,
+    logger:info("ErlCracker worker ~p: Recycling due to age limit (~pms, limit: ~pms, calls: ~p)",
+        [self(), Age, State#state.max_age_ms, State#state.call_count]),
+    recycle_worker(State);
 
 handle_info({'EXIT', _Pid, normal}, State) ->
     % Linked process finished normally
@@ -141,3 +189,50 @@ terminate(Reason, State) ->
 
 code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
+
+%%====================================================================
+%% Internal functions
+%%====================================================================
+
+%% Recycle worker by stopping old runtime and starting fresh one
+recycle_worker(State) ->
+    RuntimeModule = State#state.runtime_module,
+    PoolConfig = State#state.pool_config,
+    PoolName = State#state.pool_name,
+
+    % Cancel any existing age timer
+    case State#state.age_timer_ref of
+        undefined -> ok;
+        TimerRef -> erlang:cancel_timer(TimerRef)
+    end,
+
+    % Stop old runtime gracefully
+    catch RuntimeModule:stop_runtime(State#state.runtime_handle),
+
+    % Start fresh runtime
+    case RuntimeModule:start_runtime(PoolConfig) of
+        {ok, NewRuntimeHandle} ->
+            logger:info("ErlCracker worker ~p: Recycled successfully with fresh ~p runtime",
+                [self(), RuntimeModule]),
+
+            % Set up new age timer if configured
+            NewAgeTimerRef = case State#state.max_age_ms of
+                undefined -> undefined;
+                Ms when is_integer(Ms), Ms > 0 ->
+                    erlang:send_after(Ms, self(), recycle_age_limit)
+            end,
+
+            % Re-register with pool
+            PoolName ! {worker_available, self()},
+
+            {noreply, State#state{
+                runtime_handle = NewRuntimeHandle,
+                call_count = 0,
+                started_at = erlang:monotonic_time(millisecond),
+                age_timer_ref = NewAgeTimerRef
+            }};
+        {error, Reason} ->
+            logger:error("ErlCracker worker ~p: Failed to recycle runtime ~p: ~p",
+                [self(), RuntimeModule, Reason]),
+            {stop, {recycle_failed, Reason}, State}
+    end.

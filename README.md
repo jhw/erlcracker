@@ -11,6 +11,7 @@
 - **Async Initialization** - Workers register when ready, pool assigns queued work automatically
 - **Execution Isolation** - Double-spawn timeout pattern protects pool from hung calls
 - **Automatic Recovery** - OTP supervision restarts failed runtimes transparently
+- **Worker Recycling** - Configurable recycling by call count or age to prevent resource leaks
 - **Queue Management** - Requests queue when workers busy, process when available
 - **Runtime Agnostic** - Pluggable runtime backend via behaviour (Python, Go, Node.js, WASM)
 
@@ -156,10 +157,43 @@ Input = #{name => <<"test">>, items => [1, 2, 3]},
 ```erlang
 #{
     pool_size => 4,              % Number of workers (default: 2)
-    worker_timeout_ms => 45000   % Worker-side timeout (default: 45000)
+    worker_timeout_ms => 45000,  % Worker-side timeout (default: 45000)
+    max_calls_per_worker => 100, % Recycle worker after N calls (optional)
+    max_worker_age_ms => 3600000 % Recycle worker after time limit in ms (optional)
     % ... runtime-specific config below
 }
 ```
+
+### Worker Recycling
+
+Long-running workers can accumulate memory leaks, resource exhaustion, or corrupted state. ErlCracker supports automatic worker recycling to mitigate these issues:
+
+**Call-count based recycling:**
+```erlang
+erlcracker:start_pool(my_pool, erlcracker_python_runtime, #{
+    pool_size => 4,
+    max_calls_per_worker => 100  % Recycle after 100 calls
+}).
+```
+
+**Age-based recycling:**
+```erlang
+erlcracker:start_pool(my_pool, erlcracker_python_runtime, #{
+    pool_size => 4,
+    max_worker_age_ms => 3600000  % Recycle after 1 hour
+}).
+```
+
+**Combined recycling (whichever triggers first):**
+```erlang
+erlcracker:start_pool(my_pool, erlcracker_python_runtime, #{
+    pool_size => 4,
+    max_calls_per_worker => 1000,
+    max_worker_age_ms => 1800000  % 30 minutes
+}).
+```
+
+Recycling is transparent - the worker stops its runtime, starts a fresh one, and re-registers with the pool. In-flight requests complete normally, and queued requests are processed by the recycled worker.
 
 ### Python Runtime Configuration
 

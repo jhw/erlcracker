@@ -21,7 +21,9 @@
     test_echo/1,
     test_batch_processing/1,
     test_concurrent_calls/1,
-    test_async_call/1
+    test_async_call/1,
+    test_worker_recycling_by_call_count/1,
+    test_worker_recycling_by_age/1
 ]).
 
 %%====================================================================
@@ -38,7 +40,9 @@ all() ->
         test_echo,
         test_batch_processing,
         test_concurrent_calls,
-        test_async_call
+        test_async_call,
+        test_worker_recycling_by_call_count,
+        test_worker_recycling_by_age
     ].
 
 init_per_suite(Config) ->
@@ -260,4 +264,106 @@ test_async_call(Config) ->
     % Note: async calls return {ok, Value} directly in the message
     {ok, 13} = Result,
 
+    ok.
+
+test_worker_recycling_by_call_count(_Config) ->
+    ct:pal("Testing worker recycling by call count"),
+
+    % Get priv directory for Python modules
+    PrivDir = code:priv_dir(erlcracker),
+    PythonPath = filename:join(PrivDir, "python"),
+
+    % Start a pool with max_calls_per_worker = 3
+    % Use a single worker to make testing predictable
+    {ok, PoolPid} = erlcracker:start_pool(
+        recycle_test_pool,
+        erlcracker_python_runtime,
+        #{
+            pool_size => 1,
+            worker_timeout_ms => 30000,
+            python_path => PythonPath,
+            max_calls_per_worker => 3
+        }
+    ),
+    unlink(PoolPid),
+
+    % Wait for worker to initialize
+    timer:sleep(1000),
+
+    ct:pal("Making 10 calls (should trigger recycling multiple times)"),
+
+    % Make 10 calls - should trigger recycling at calls 3, 6, 9
+    Results = lists:map(
+        fun(N) ->
+            Result = erlcracker:call(recycle_test_pool, test_module, echo, [N], 5000),
+            ct:pal("Call ~p result: ~p", [N, Result]),
+            Result
+        end,
+        lists:seq(1, 10)
+    ),
+
+    % Verify all calls succeeded
+    lists:foreach(
+        fun({N, Result}) ->
+            case Result of
+                {ok, N} -> ok;
+                Other -> ct:fail({unexpected_result, N, Other})
+            end
+        end,
+        lists:zip(lists:seq(1, 10), Results)
+    ),
+
+    ct:pal("All 10 calls succeeded through multiple recycles"),
+
+    % Cleanup
+    ok = erlcracker:stop_pool(recycle_test_pool),
+    ok.
+
+test_worker_recycling_by_age(_Config) ->
+    ct:pal("Testing worker recycling by age"),
+
+    % Get priv directory for Python modules
+    PrivDir = code:priv_dir(erlcracker),
+    PythonPath = filename:join(PrivDir, "python"),
+
+    % Start a pool with max_worker_age_ms = 2000 (2 seconds)
+    {ok, PoolPid} = erlcracker:start_pool(
+        age_recycle_test_pool,
+        erlcracker_python_runtime,
+        #{
+            pool_size => 1,
+            worker_timeout_ms => 30000,
+            python_path => PythonPath,
+            max_worker_age_ms => 2000
+        }
+    ),
+    unlink(PoolPid),
+
+    % Wait for worker to initialize
+    timer:sleep(1000),
+
+    % Make initial call
+    {ok, 1} = erlcracker:call(age_recycle_test_pool, test_module, echo, [1], 5000),
+    ct:pal("Initial call succeeded"),
+
+    % Wait for age-based recycling to trigger (2 seconds + buffer)
+    ct:pal("Waiting 2.5 seconds for age-based recycling..."),
+    timer:sleep(2500),
+
+    % Make another call - worker should have recycled
+    {ok, 2} = erlcracker:call(age_recycle_test_pool, test_module, echo, [2], 5000),
+    ct:pal("Post-recycle call succeeded"),
+
+    % Wait for another recycle cycle
+    ct:pal("Waiting another 2.5 seconds for second age-based recycling..."),
+    timer:sleep(2500),
+
+    % Make final call
+    {ok, 3} = erlcracker:call(age_recycle_test_pool, test_module, echo, [3], 5000),
+    ct:pal("Second post-recycle call succeeded"),
+
+    ct:pal("Age-based recycling working correctly"),
+
+    % Cleanup
+    ok = erlcracker:stop_pool(age_recycle_test_pool),
     ok.
